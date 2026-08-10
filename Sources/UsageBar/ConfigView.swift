@@ -2,11 +2,12 @@ import SwiftUI
 
 // ==========================================
 // 配置面板：浏览器登录 + 刷新频率设置
+// 显示在独立窗口（ConfigWindowController）中
 // ==========================================
 
 struct ConfigView: View {
-    @Environment(\.dismiss) private var dismiss
     let model: UsageModel
+    var onClose: () -> Void = {}
 
     @State private var refreshIntervalSec = 300
 
@@ -83,10 +84,10 @@ struct ConfigView: View {
             HStack {
                 Button("清除配置") {
                     model.saveConfig(Config.Stored())
-                    dismiss()
+                    onClose()
                 }
                 Spacer()
-                Button("完成") { dismiss() }
+                Button("完成") { onClose() }
             }
         }
         .padding(20)

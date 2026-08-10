@@ -16,12 +16,12 @@ final class UsageModel {
     }
 
     var status: Status = .idle
-    var isConfigPresented = false
     var loginErrorMessage: String?
     var isLoggingIn = false
 
     private var timer: Timer?
     private var loginController: LoginWindowController?
+    private var configController: ConfigWindowController?
 
     /// 刷新间隔上下限（秒）：过短可能触发 opencode.ai 服务端限流
     static let minRefreshInterval = 30
@@ -33,6 +33,10 @@ final class UsageModel {
         // 排障钩子：USAGEBAR_AUTO_LOGIN=1 启动时自动弹出登录窗口
         if ProcessInfo.processInfo.environment["USAGEBAR_AUTO_LOGIN"] == "1" {
             Task { startLogin() }
+        }
+        // 排障钩子：USAGEBAR_OPEN_CONFIG=1 启动时自动打开配置窗口
+        if ProcessInfo.processInfo.environment["USAGEBAR_OPEN_CONFIG"] == "1" {
+            Task { openConfig() }
         }
     }
 
@@ -85,6 +89,17 @@ final class UsageModel {
         }
     }
 
+    // MARK: - 配置窗口
+
+    /// 打开独立配置窗口（不随菜单栏面板关闭）
+    func openConfig() {
+        if configController == nil {
+            configController = ConfigWindowController(model: self)
+        }
+        Self.debugLog("openConfig 调用")
+        configController?.show()
+    }
+
     // MARK: - 登录
 
     /// 弹出内嵌浏览器登录窗口，成功后自动保存配置并刷新
@@ -106,7 +121,7 @@ final class UsageModel {
                     baseURL: "https://opencode.ai",
                     cookie: r.cookie
                 ))
-                self.isConfigPresented = false
+                self.configController?.close()  // 登录完成，关闭配置窗口
             case .failure(let e):
                 Self.debugLog("登录取消/失败: \(e.localizedDescription)")
                 // 用户主动关闭窗口视为取消，不提示错误；其余失败才提示

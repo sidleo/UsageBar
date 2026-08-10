@@ -17,12 +17,6 @@ struct UsagePanelView: View {
         }
         .padding(14)
         .frame(width: 300)
-        .sheet(isPresented: Binding(
-            get: { model.isConfigPresented },
-            set: { model.isConfigPresented = $0 }
-        )) {
-            ConfigView(model: model)
-        }
     }
 
     // MARK: - 头部
@@ -53,7 +47,7 @@ struct UsagePanelView: View {
             VStack(spacing: 8) {
                 Text("尚未配置 OpenCode Go")
                     .foregroundStyle(.secondary)
-                Button("去配置") { model.isConfigPresented = true }
+                Button("去配置") { model.openConfig() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
             }
@@ -74,7 +68,7 @@ struct UsagePanelView: View {
                     .font(.caption)
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
-                Button("重新配置") { model.isConfigPresented = true }
+                Button("重新配置") { model.openConfig() }
                     .buttonStyle(.link)
                     .controlSize(.small)
             }
@@ -101,7 +95,7 @@ struct UsagePanelView: View {
             }
             Spacer()
             Button {
-                model.isConfigPresented = true
+                model.openConfig()
             } label: {
                 Image(systemName: "gearshape")
             }
