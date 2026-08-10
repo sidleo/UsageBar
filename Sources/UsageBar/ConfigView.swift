@@ -1,12 +1,14 @@
 import SwiftUI
 
 // ==========================================
-// 配置面板：仅浏览器登录（内嵌 WKWebView 自动捕获）
+// 配置面板：浏览器登录 + 刷新频率设置
 // ==========================================
 
 struct ConfigView: View {
     @Environment(\.dismiss) private var dismiss
     let model: UsageModel
+
+    @State private var refreshIntervalSec = 300
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -46,6 +48,38 @@ struct ConfigView: View {
 
             Divider()
 
+            // 刷新频率设置（秒）
+            VStack(alignment: .leading, spacing: 6) {
+                Text("自动刷新频率")
+                    .font(.subheadline)
+                HStack(spacing: 8) {
+                    TextField("300", value: $refreshIntervalSec, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 100)
+                        .multilineTextAlignment(.trailing)
+                    Text("秒")
+                        .foregroundStyle(.secondary)
+                    Stepper("", value: $refreshIntervalSec,
+                            in: UsageModel.minRefreshInterval...UsageModel.maxRefreshInterval)
+                        .labelsHidden()
+                    Spacer()
+                    Button("保存") {
+                        var c = Config.load()
+                        c.refreshIntervalSec = max(
+                            UsageModel.minRefreshInterval,
+                            min(UsageModel.maxRefreshInterval, refreshIntervalSec)
+                        )
+                        model.saveConfig(c)
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+                Text("范围 \(UsageModel.minRefreshInterval)–\(UsageModel.maxRefreshInterval) 秒；过短可能触发服务端限流")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Divider()
+
             HStack {
                 Button("清除配置") {
                     model.saveConfig(Config.Stored())
@@ -53,10 +87,12 @@ struct ConfigView: View {
                 }
                 Spacer()
                 Button("完成") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
-        .frame(width: 380)
+        .frame(width: 400)
+        .onAppear {
+            refreshIntervalSec = Config.load().refreshIntervalSec
+        }
     }
 }

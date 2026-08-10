@@ -22,17 +22,29 @@ final class UsageModel {
 
     private var timer: Timer?
     private var loginController: LoginWindowController?
-    private let refreshInterval: TimeInterval = 300  // 5 分钟
+
+    /// 刷新间隔上下限（秒）：过短可能触发 opencode.ai 服务端限流
+    static let minRefreshInterval = 30
+    static let maxRefreshInterval = 86400
 
     init() {
-        timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in await self?.refresh() }
-        }
+        restartTimer()
         Task { await refresh() }
         // 排障钩子：USAGEBAR_AUTO_LOGIN=1 启动时自动弹出登录窗口
         if ProcessInfo.processInfo.environment["USAGEBAR_AUTO_LOGIN"] == "1" {
             Task { startLogin() }
         }
+    }
+
+    /// 按当前配置的刷新间隔（秒）重启定时器
+    func restartTimer() {
+        timer?.invalidate()
+        timer = nil
+        let sec = max(Self.minRefreshInterval, min(Self.maxRefreshInterval, Config.load().refreshIntervalSec))
+        timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(sec), repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.refresh() }
+        }
+        Self.debugLog("刷新间隔设置为 \(sec) 秒")
     }
 
     func refresh() async {
@@ -134,6 +146,7 @@ final class UsageModel {
 
     func saveConfig(_ c: Config.Stored) {
         Config.save(c)
+        restartTimer()  // 刷新间隔可能变化，重启定时器
         Task { await refresh() }
     }
 

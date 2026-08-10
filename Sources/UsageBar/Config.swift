@@ -12,6 +12,7 @@ enum Config {
         var workspaceID: String = ""
         var baseURL: String = "https://opencode.ai"
         var cookie: String = ""
+        var refreshIntervalSec: Int = 300  // 自动刷新间隔（秒）
 
         var isComplete: Bool {
             !workspaceID.isEmpty && !cookie.isEmpty
@@ -19,10 +20,11 @@ enum Config {
 
         init() {}
 
-        init(workspaceID: String, baseURL: String, cookie: String) {
+        init(workspaceID: String, baseURL: String, cookie: String, refreshIntervalSec: Int = 300) {
             self.workspaceID = workspaceID
             self.baseURL = baseURL
             self.cookie = cookie
+            self.refreshIntervalSec = refreshIntervalSec
         }
 
         /// 容错 decode：历史/手写配置可能缺字段，缺失时用默认值
@@ -31,6 +33,7 @@ enum Config {
             workspaceID = try c.decodeIfPresent(String.self, forKey: .workspaceID) ?? ""
             baseURL = try c.decodeIfPresent(String.self, forKey: .baseURL) ?? "https://opencode.ai"
             cookie = try c.decodeIfPresent(String.self, forKey: .cookie) ?? ""
+            refreshIntervalSec = try c.decodeIfPresent(Int.self, forKey: .refreshIntervalSec) ?? 300
         }
     }
 
