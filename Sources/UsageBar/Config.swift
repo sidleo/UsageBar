@@ -13,6 +13,7 @@ enum Config {
         var baseURL: String = "https://opencode.ai"
         var cookie: String = ""
         var refreshIntervalSec: Int = 300  // 自动刷新间隔（秒）
+        var menuBarDisplay: String = "auto"  // 菜单栏显示哪个窗口: auto/rolling/weekly/monthly
 
         var isComplete: Bool {
             !workspaceID.isEmpty && !cookie.isEmpty
@@ -20,11 +21,13 @@ enum Config {
 
         init() {}
 
-        init(workspaceID: String, baseURL: String, cookie: String, refreshIntervalSec: Int = 300) {
+        init(workspaceID: String, baseURL: String, cookie: String,
+             refreshIntervalSec: Int = 300, menuBarDisplay: String = "auto") {
             self.workspaceID = workspaceID
             self.baseURL = baseURL
             self.cookie = cookie
             self.refreshIntervalSec = refreshIntervalSec
+            self.menuBarDisplay = menuBarDisplay
         }
 
         /// 容错 decode：历史/手写配置可能缺字段，缺失时用默认值
@@ -34,6 +37,7 @@ enum Config {
             baseURL = try c.decodeIfPresent(String.self, forKey: .baseURL) ?? "https://opencode.ai"
             cookie = try c.decodeIfPresent(String.self, forKey: .cookie) ?? ""
             refreshIntervalSec = try c.decodeIfPresent(Int.self, forKey: .refreshIntervalSec) ?? 300
+            menuBarDisplay = try c.decodeIfPresent(String.self, forKey: .menuBarDisplay) ?? "auto"
         }
     }
 

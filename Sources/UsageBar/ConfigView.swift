@@ -10,6 +10,7 @@ struct ConfigView: View {
     var onClose: () -> Void = {}
 
     @State private var refreshIntervalSec = 300
+    @State private var menuBarDisplay = "auto"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -49,34 +50,59 @@ struct ConfigView: View {
 
             Divider()
 
-            // 刷新频率设置（秒）
-            VStack(alignment: .leading, spacing: 6) {
-                Text("自动刷新频率")
-                    .font(.subheadline)
-                HStack(spacing: 8) {
-                    TextField("300", value: $refreshIntervalSec, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 100)
-                        .multilineTextAlignment(.trailing)
-                    Text("秒")
-                        .foregroundStyle(.secondary)
-                    Stepper("", value: $refreshIntervalSec,
-                            in: UsageModel.minRefreshInterval...UsageModel.maxRefreshInterval)
-                        .labelsHidden()
+            // 设置区
+            VStack(alignment: .leading, spacing: 12) {
+                // 自动刷新频率（秒）
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("自动刷新频率")
+                        .font(.subheadline)
+                    HStack(spacing: 8) {
+                        TextField("300", value: $refreshIntervalSec, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 100)
+                            .multilineTextAlignment(.trailing)
+                        Text("秒")
+                            .foregroundStyle(.secondary)
+                        Stepper("", value: $refreshIntervalSec,
+                                in: UsageModel.minRefreshInterval...UsageModel.maxRefreshInterval)
+                            .labelsHidden()
+                        Spacer()
+                    }
+                    Text("范围 \(UsageModel.minRefreshInterval)–\(UsageModel.maxRefreshInterval) 秒；过短可能触发服务端限流")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+
+                // 菜单栏显示哪个窗口
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("菜单栏显示")
+                        .font(.subheadline)
+                    Picker("", selection: $menuBarDisplay) {
+                        Text("自动（取最高用量）").tag("auto")
+                        Text("5小时额度").tag("rolling")
+                        Text("本周额度").tag("weekly")
+                        Text("本月额度").tag("monthly")
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("菜单栏图标上显示的百分比来源")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+
+                HStack {
                     Spacer()
-                    Button("保存") {
+                    Button("保存设置") {
                         var c = Config.load()
                         c.refreshIntervalSec = max(
                             UsageModel.minRefreshInterval,
                             min(UsageModel.maxRefreshInterval, refreshIntervalSec)
                         )
+                        c.menuBarDisplay = menuBarDisplay
                         model.saveConfig(c)
                     }
                     .keyboardShortcut(.defaultAction)
                 }
-                Text("范围 \(UsageModel.minRefreshInterval)–\(UsageModel.maxRefreshInterval) 秒；过短可能触发服务端限流")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
             }
 
             Divider()
@@ -93,7 +119,9 @@ struct ConfigView: View {
         .padding(20)
         .frame(width: 400)
         .onAppear {
-            refreshIntervalSec = Config.load().refreshIntervalSec
+            let c = Config.load()
+            refreshIntervalSec = c.refreshIntervalSec
+            menuBarDisplay = c.menuBarDisplay
         }
     }
 }

@@ -67,7 +67,7 @@ final class UsageModel {
                 cookie: cfg.cookie
             ).fetch()
             status = .loaded(data)
-            Self.debugLog("刷新成功: " + data.windows.map { "\($0.kind.rawValue)=\($0.percent)%" }.joined(separator: " "))
+            Self.debugLog("刷新成功: " + data.windows.map { "\($0.kind.rawValue)=\($0.percent)%" }.joined(separator: " ") + " | 菜单栏模式: \(Config.load().menuBarDisplay)")
         } catch {
             status = .failed(error.localizedDescription)
             Self.debugLog("刷新失败: \(error)")
@@ -134,20 +134,31 @@ final class UsageModel {
         }
     }
 
-    // MARK: - 菜单栏显示（图标直接显示最高用量百分比）
+    // MARK: - 菜单栏显示（按配置选择显示 5小时/周/月/自动最高）
 
-    private var maxPercent: Int? {
+    /// 菜单栏显示值：根据配置的 menuBarDisplay 选择窗口，auto 取最高
+    private func menuBarPercent() -> Int? {
         guard case .loaded(let data) = status else { return nil }
-        return data.windows.map(\.percent).max()
+        let windows = orderedWindows(from: data)
+        switch Config.load().menuBarDisplay {
+        case "rolling":
+            return windows.first { $0.kind == .rolling }?.percent
+        case "weekly":
+            return windows.first { $0.kind == .weekly }?.percent
+        case "monthly":
+            return windows.first { $0.kind == .monthly }?.percent
+        default:  // auto
+            return windows.map(\.percent).max()
+        }
     }
 
     var menuBarText: String {
-        if let p = maxPercent { return "\(p)%" }
+        if let p = menuBarPercent() { return "\(p)%" }
         return "…"  // 未配置 / 加载中 / 失败
     }
 
     var menuBarColor: Color {
-        colorForPercent(maxPercent)
+        colorForPercent(menuBarPercent())
     }
 
     func colorForPercent(_ pct: Int?) -> Color {
