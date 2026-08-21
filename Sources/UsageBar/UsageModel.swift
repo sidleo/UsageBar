@@ -15,7 +15,9 @@ final class UsageModel {
         case failed(String)
     }
 
-    var status: Status = .idle
+    var status: Status = .idle                 // OpenCode Go 状态
+    var commandCodeStatus: Status = .idle      // Command Code Go 状态
+    var commandCodeUsage: CommandCodeUsage?    // Command Code 额外信息（credits）
     var loginErrorMessage: String?
     var isLoggingIn = false
 
@@ -52,11 +54,18 @@ final class UsageModel {
     }
 
     func refresh() async {
+        // 并行刷新两个服务
+        async let opencode: Void = refreshOpencode()
+        async let commandcode: Void = refreshCommandCode()
+        _ = await (opencode, commandcode)
+    }
+
+    private func refreshOpencode() async {
         let cfg = Config.load()
         Self.debugLog("配置检查: wsID=\(cfg.workspaceID), cookieLen=\(cfg.cookie.count), cookiePrefix=\(cfg.cookie.prefix(12))")
         guard cfg.isComplete else {
             status = .idle
-            Self.debugLog("未配置，跳过刷新")
+            Self.debugLog("OpenCode 未配置，跳过刷新")
             return
         }
         status = .loading
@@ -67,10 +76,31 @@ final class UsageModel {
                 cookie: cfg.cookie
             ).fetch()
             status = .loaded(data)
-            Self.debugLog("刷新成功: " + data.windows.map { "\($0.kind.rawValue)=\($0.percent)%" }.joined(separator: " ") + " | 菜单栏模式: \(Config.load().menuBarDisplay)")
+            Self.debugLog("OpenCode 刷新成功: " + data.windows.map { "\($0.kind.rawValue)=\($0.percent)%" }.joined(separator: " "))
         } catch {
             status = .failed(error.localizedDescription)
-            Self.debugLog("刷新失败: \(error)")
+            Self.debugLog("OpenCode 刷新失败: \(error)")
+        }
+    }
+
+    private func refreshCommandCode() async {
+        guard CommandCodeFetcher.isLoggedIn() else {
+            commandCodeStatus = .idle
+            Self.debugLog("Command Code 未登录，跳过刷新")
+            return
+        }
+        commandCodeStatus = .loading
+        do {
+            let usage = try await CommandCodeFetcher().fetch()
+            commandCodeUsage = usage
+            commandCodeStatus = .loaded(UsageData(
+                windows: usage.windows,
+                fetchedAt: usage.fetchedAt
+            ))
+            Self.debugLog("Command Code 刷新成功: " + usage.windows.map { "\($0.kind.rawValue)=\($0.percent)%" }.joined(separator: " ") + " | credits 剩余 $\(usage.creditsRemaining)/$\(usage.creditsTotal)")
+        } catch {
+            commandCodeStatus = .failed(error.localizedDescription)
+            Self.debugLog("Command Code 刷新失败: \(error)")
         }
     }
 
@@ -134,11 +164,21 @@ final class UsageModel {
         }
     }
 
-    // MARK: - 菜单栏显示（按配置选择显示 5小时/周/月/自动最高）
+    // MARK: - 菜单栏显示（按配置选择服务与窗口）
+
+    /// 当前激活的服务（配置 activeService）
+    var activeService: String {
+        Config.load().activeService
+    }
+
+    /// 当前服务的状态（按 activeService）
+    var activeStatus: Status {
+        activeService == "commandcode" ? commandCodeStatus : status
+    }
 
     /// 菜单栏显示值：根据配置的 menuBarDisplay 选择窗口，auto 取最高
     private func menuBarPercent() -> Int? {
-        guard case .loaded(let data) = status else { return nil }
+        guard case .loaded(let data) = activeStatus else { return nil }
         let windows = orderedWindows(from: data)
         switch Config.load().menuBarDisplay {
         case "rolling":

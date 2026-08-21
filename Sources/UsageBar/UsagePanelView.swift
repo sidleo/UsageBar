@@ -23,10 +23,22 @@ struct UsagePanelView: View {
 
     private var header: some View {
         HStack {
-            Image(systemName: "bolt.fill")
-                .foregroundStyle(model.menuBarColor)
-            Text("OpenCode Go 用量")
-                .font(.headline)
+            // 服务切换（菜单栏当前显示哪个服务）
+            Picker("", selection: Binding(
+                get: { model.activeService },
+                set: { newValue in
+                    var c = Config.load()
+                    c.activeService = newValue
+                    model.saveConfig(c)
+                }
+            )) {
+                Text("OpenCode").tag("opencode")
+                Text("Command Code").tag("commandcode")
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
+            .help("切换菜单栏显示的服务")
+
             Spacer()
             Button {
                 Task { await model.refresh() }
@@ -38,18 +50,30 @@ struct UsagePanelView: View {
         }
     }
 
+    /// 当前服务显示名
+    private var serviceTitle: String {
+        model.activeService == "commandcode" ? "Command Code Go 用量" : "OpenCode Go 用量"
+    }
+
     // MARK: - 内容区
 
     @ViewBuilder
     private var content: some View {
-        switch model.status {
+        let st = model.activeStatus
+        switch st {
         case .idle:
             VStack(spacing: 8) {
-                Text("尚未配置 OpenCode Go")
+                Text(serviceTitle + (model.activeService == "commandcode" ? "（未登录）" : "（未配置）"))
                     .foregroundStyle(.secondary)
-                Button("去配置") { model.openConfig() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                if model.activeService == "commandcode" {
+                    Text("请先在终端运行：cmd login")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Button("去配置") { model.openConfig() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 20)
@@ -68,9 +92,15 @@ struct UsagePanelView: View {
                     .font(.caption)
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
-                Button("重新配置") { model.openConfig() }
-                    .buttonStyle(.link)
-                    .controlSize(.small)
+                if model.activeService == "commandcode" {
+                    Text("提示：请在终端运行 cmd login 后刷新")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Button("重新配置") { model.openConfig() }
+                        .buttonStyle(.link)
+                        .controlSize(.small)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
@@ -80,6 +110,17 @@ struct UsagePanelView: View {
                 ForEach(model.orderedWindows(from: data)) { w in
                     UsageRow(window: w, model: model)
                 }
+                // Command Code 额外显示月 credits
+                if model.activeService == "commandcode", let u = model.commandCodeUsage {
+                    HStack {
+                        Text("月 credits 剩余")
+                            .font(.system(size: 13))
+                        Spacer()
+                        Text(String(format: "$%.2f / $%.2f", u.creditsRemaining, u.creditsTotal))
+                            .font(.system(.body, design: .rounded).monospacedDigit())
+                    }
+                    .padding(.top, 2)
+                }
             }
         }
     }
@@ -88,7 +129,7 @@ struct UsagePanelView: View {
 
     private var footer: some View {
         HStack {
-            if case .loaded(let data) = model.status {
+            if case .loaded(let data) = model.activeStatus {
                 Text("更新于 \(model.timeString(data.fetchedAt))")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
