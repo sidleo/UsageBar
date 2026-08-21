@@ -7,18 +7,19 @@ import Foundation
 //   - 来源：~/.commandcode/auth.json 的 apiKey 字段（cmd CLI 登录后写入）
 //   - 或环境变量 COMMANDCODE_API_KEY
 // 接口（base: https://api.commandcode.ai）：
-//   1. GET /alpha/whoami                       → org.id
-//   2. GET /alpha/billing/credits?orgId=       → 计划/credits 信息
-//   3. GET /alpha/billing/subscriptions?orgId= → currentPeriodStart/End
-//   4. GET /alpha/usage/summary?orgId=&since=  → fiveHour/weekly 窗口 (used/cap/resetAt)
-// 端点与字段名来自 command-code CLI 源码（v1.31.0，npm 包 dist/cli.mjs）
+//   1. GET /alpha/billing/credits（无参）→ windowLimits.fiveHour/weekly（5小时/周窗口）
+//   2. GET /alpha/usage/summary（无参）  → totalCost/totalMonthlyCredits（月用量）
+//   3. GET /alpha/billing/subscriptions  → currentPeriodEnd（月周期）
+// 实测确认（2026-08-21）：个人用户 orgId=null，接口均不带 orgId 参数；
+// resetAt 为 epoch 毫秒；窗口数据在 credits.windowLimits，不在 summary。
+// 端点与字段名来自 command-code CLI 源码（v1.31.0，npm 包 dist/cli.mjs）+ 真实请求验证
 // ==========================================
 
 /// Command Code 用量（含月 credits 信息）
 struct CommandCodeUsage: Equatable {
-    var windows: [UsageWindow] = []      // rolling(fiveHour) + weekly，可能含 monthly(credits%)
-    var creditsRemaining: Double = 0     // 月剩余 credits（$）
-    var creditsTotal: Double = 0         // 月总 credits（$）
+    var windows: [UsageWindow] = []      // rolling(fiveHour) + weekly + monthly(credits%)
+    var creditsRemaining: Double = 0     // 月剩余 credits
+    var creditsTotal: Double = 0         // 月总 credits
     var periodEnd: Date?                 // 月周期结束（用于 monthly 重置时间）
     var fetchedAt: Date = Date()
 }
@@ -64,89 +65,92 @@ struct CommandCodeFetcher {
         }
         let client = Self.client(apiKey: apiKey)
 
-        // 1. whoami → org.id
-        struct Whoami: Decodable {
-            struct Org: Decodable { let id: String }
-            let org: Org?
-        }
-        let whoami: Whoami = try await client.get("/alpha/whoami")
-        guard let orgId = whoami.org?.id, !orgId.isEmpty else {
-            throw CommandCodeError.parseFailed
-        }
-
-        // 2+3. credits + subscription（并行）
-        let orgQuery = "orgId=\(orgId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? orgId)"
+        // 1. credits（无参）→ windowLimits.fiveHour/weekly + monthlyCredits
         struct Credits: Decodable {
             struct Inner: Decodable {
-                let planId: String?
                 let monthlyCredits: Double?
                 let purchasedCredits: Double?
                 let freeCredits: Double?
             }
+            struct WindowLimit: Decodable {
+                let used: Double?
+                let cap: Double?
+                let resetAt: Double?   // epoch 毫秒
+                let exceeded: Bool?
+            }
+            struct WindowLimits: Decodable {
+                let limited: Bool?
+                let fiveHour: WindowLimit?
+                let weekly: WindowLimit?
+            }
             let credits: Inner?
+            let windowLimits: WindowLimits?
         }
+        let credits: Credits = try await client.get("/alpha/billing/credits")
+
+        // 2. summary（无参）→ totalCost/totalMonthlyCredits（月用量）
+        struct Summary: Decodable {
+            let totalCost: Double?
+            let totalMonthlyCredits: Double?
+            let totalCount: Int?
+        }
+        let summary: Summary? = try await client.getOptional("/alpha/usage/summary", as: Summary.self)
+
+        // 3. subscriptions（无参）→ currentPeriodEnd
         struct Subscription: Decodable {
             struct Inner: Decodable {
-                let planId: String?
                 let status: String?
-                let currentPeriodStart: String?
                 let currentPeriodEnd: String?
+                let planId: String?
             }
             let data: Inner?
         }
-        async let creditsResult = client.getOptional("/alpha/billing/credits?\(orgQuery)", as: Credits.self)
-        async let subResult = client.getOptional("/alpha/billing/subscriptions?\(orgQuery)", as: Subscription.self)
-        let (credits, subscription) = try await (creditsResult, subResult)
+        let subscription: Subscription? = try await client.getOptional("/alpha/billing/subscriptions", as: Subscription.self)
 
-        // 4. summary：since = currentPeriodStart
-        let since = subscription?.data?.currentPeriodStart ?? ""
-        struct Summary: Decodable {
-            struct Window: Decodable {
-                let used: Double?
-                let cap: Double?
-                let resetAt: String?
-            }
-            let fiveHour: Window?
-            let weekly: Window?
-            let totalCost: Double?
-        }
-        let sinceQuery = since.isEmpty ? "" : "&since=\(since.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? since)"
-        let summary: Summary? = try await client.getOptional("/alpha/usage/summary?\(orgQuery)\(sinceQuery)", as: Summary.self)
-
-        // 组装
+        // 组装窗口
         var windows: [UsageWindow] = []
         let now = Date()
         let df = ISO8601DateFormatter()
-        func secUntilReset(_ s: String?) -> Int {
+        // resetAt 是 epoch 毫秒
+        func secUntilResetMs(_ ms: Double?) -> Int {
+            guard let ms, ms > 0 else { return 0 }
+            let reset = Date(timeIntervalSince1970: ms / 1000)
+            return max(0, Int(reset.timeIntervalSince(now)))
+        }
+        // ISO 字符串（月周期结束）
+        func secUntilResetISO(_ s: String?) -> Int {
             guard let s, let d = df.date(from: s) else { return 0 }
             return max(0, Int(d.timeIntervalSince(now)))
         }
-        func window(_ kind: UsageWindow.Kind, _ w: Summary.Window?) -> UsageWindow? {
-            guard let w, let cap = w.cap, cap > 0 else { return nil }
-            let used = w.used ?? 0
-            return UsageWindow(
-                kind: kind,
-                percent: min(100, max(0, Int((used / cap * 100).rounded()))),
-                resetInSec: secUntilReset(w.resetAt)
-            )
-        }
-        if let w = window(.rolling, summary?.fiveHour) { windows.append(w) }
-        if let w = window(.weekly, summary?.weekly) { windows.append(w) }
 
-        // 月 credits：monthlyRemaining / total
-        let monthly = credits?.credits?.monthlyCredits ?? 0
-        let purchased = credits?.credits?.purchasedCredits ?? 0
-        let free = credits?.credits?.freeCredits ?? 0
-        let total = monthly + purchased + free
+        let limits = credits.windowLimits
+        if let w = limits?.fiveHour, let cap = w.cap, cap > 0 {
+            let used = w.used ?? 0
+            windows.append(UsageWindow(
+                kind: .rolling,
+                percent: min(100, max(0, Int((used / cap * 100).rounded()))),
+                resetInSec: secUntilResetMs(w.resetAt)
+            ))
+        }
+        if let w = limits?.weekly, let cap = w.cap, cap > 0 {
+            let used = w.used ?? 0
+            windows.append(UsageWindow(
+                kind: .weekly,
+                percent: min(100, max(0, Int((used / cap * 100).rounded()))),
+                resetInSec: secUntilResetMs(w.resetAt)
+            ))
+        }
+
+        // 月窗口：totalCost / totalMonthlyCredits
+        let total = credits.credits?.monthlyCredits ?? 0
         let spent = summary?.totalCost ?? 0
         let remaining = max(0, total - spent)
         if total > 0 {
-            let pct = min(100, max(0, Int(((total - remaining) / total * 100).rounded())))
-            let end = subscription?.data?.currentPeriodEnd
+            let pct = min(100, max(0, Int((spent / total * 100).rounded())))
             windows.append(UsageWindow(
                 kind: .monthly,
                 percent: pct,
-                resetInSec: secUntilReset(end)
+                resetInSec: secUntilResetISO(subscription?.data?.currentPeriodEnd)
             ))
         }
 
